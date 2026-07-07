@@ -339,15 +339,13 @@ class SolverApp:
             w.destroy()
         self.number_entries = []
         count = self.count_var.get()
-        grid_frame = ttk.Frame(self.frame_numbers)
-        grid_frame.pack(padx=10, pady=8)
-        per_row = 3  # จัดสูงสุด 3 ช่องต่อแถว กันไม่ให้ล้นหน้าต่างเมื่อเลือก 5 ตัวเลข
+        col_frame = ttk.Frame(self.frame_numbers)
+        col_frame.pack(padx=10, pady=8, anchor="w")
         for i in range(count):
-            r, c = divmod(i, per_row)
-            cell = ttk.Frame(grid_frame)
-            cell.grid(row=r, column=c, padx=10, pady=6, sticky="w")
-            ttk.Label(cell, text=f"เลขตัวที่ {i + 1}:").pack(side="left", padx=(0, 4))
-            e = ttk.Entry(cell, width=8, font=("TH Sarabun New", 13))
+            cell = ttk.Frame(col_frame)
+            cell.pack(fill="x", pady=5, anchor="w")
+            ttk.Label(cell, text=f"เลขตัวที่ {i + 1}:", width=12).pack(side="left", padx=(0, 8))
+            e = ttk.Entry(cell, width=14, font=("TH Sarabun New", 13))
             e.pack(side="left")
             self.number_entries.append(e)
 
