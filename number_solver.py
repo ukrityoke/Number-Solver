@@ -1,14 +1,16 @@
 """
 โปรแกรมหาสูตรคำนวณจากตัวเลข 4-5 ตัว ให้ได้คำตอบตามที่กำหนด
 ==========================================================
-- รองรับเครื่องหมาย: + - * / ^ (ยกกำลัง) ! (แฟกทอเรียล) % (มอดูโล) และวงเล็บ (โดยอัตโนมัติ)
+- รองรับเครื่องหมาย: + - * / ^ (ยกกำลัง) ! (แฟกทอเรียล) % (มอดูโล) √ (รากที่ 2) ∛ (รากที่ 3) และวงเล็บ (โดยอัตโนมัติ)
 - มีเครื่องหมายเสริมให้เลือกเพิ่ม: // (หารปัดเศษลง)
 - เลือกได้ว่าจะอนุญาตให้ใช้ตัวเลขซ้ำหรือไม่ (ค่าเริ่มต้น = ไม่ซ้ำ คือใช้เลขที่กรอกแต่ละตัวครั้งเดียว)
 - เลือกได้ว่าจะ "บังคับ" ให้คำตอบต้องมีเครื่องหมายใดบ้าง (เช่น บังคับต้องมี ! หรือบังคับต้องมี %)
 - ใช้เลขคณิตแบบเศษส่วน (Fraction) ตลอดการคำนวณ เพื่อความแม่นยำ 100% ไม่มีปัญหาความคลาดเคลื่อนของทศนิยม
+  (√ และ ∛ จะใช้ได้ก็ต่อเมื่อผลลัพธ์ออกมาเป็นเศษส่วน/จำนวนเต็มพอดี เพื่อรักษาความแม่นยำแบบ 100% เสมอ)
 - ใช้เทคนิค memoization (จดจำสถานะที่เคยลองแล้ว) เพื่อตัดกิ่งการค้นหาที่ซ้ำซ้อน ทำให้ค้นหาได้เร็วขึ้นมาก
   และหยุดทันทีเมื่อเจอคำตอบแรก (early stopping)
 - เมื่อเจอคำตอบ จะแสดง "วิธีทำทีละขั้น" ด้านล่าง เพื่อให้ตรวจสอบความถูกต้องได้ง่าย
+- เมื่อสูตรมีวงเล็บซ้อนกันหลายชั้น จะสลับชนิดวงเล็บตามความลึก () -> [] -> {} -> () ... เพื่อให้อ่านง่าย
 
 หากต้องการเพิ่มเครื่องหมายใหม่ ๆ ในอนาคต ให้ไปแก้ที่ฟังก์ชัน gen_pair_results() และ build_variants()
 """
@@ -31,6 +33,54 @@ MAX_POWER_EXP = 6          # จำกัดเลขชี้กำลังไ
 # เครื่องหมายที่แสดงผลให้สวยขึ้นตอนโชว์ขั้นตอน (ของจริงตอนคำนวณยังใช้สัญลักษณ์เดิม)
 DISPLAY_SYMBOL = {'+': '+', '-': '-', '*': '×', '/': '÷', '//': 'div', '^': '^', '%': 'mod'}
 
+# เครื่องหมายยูนารี (ทำกับเลขตัวเดียว): เก็บว่าเป็นแบบ "postfix" (ต่อท้าย เช่น 4!) หรือ
+# "prefix" (นำหน้า เช่น √16) และสัญลักษณ์ที่ใช้แสดงผล
+UNARY_DISPLAY = {
+    '!': ('post', '!'),
+    'sqrt': ('pre', '√'),
+    'cbrt': ('pre', '∛'),
+}
+
+# ชนิดวงเล็บที่จะสลับใช้ตามความลึกของการซ้อน เพื่อให้อ่านสูตรที่ซับซ้อนได้ง่ายขึ้น
+BRACKET_TYPES = [('(', ')'), ('[', ']'), ('{', '}')]
+
+
+def bracket_pair(depth: int):
+    return BRACKET_TYPES[depth % len(BRACKET_TYPES)]
+
+
+def integer_nth_root(n: int, k: int):
+    """คืนค่าจำนวนเต็ม r ที่ r**k == n พอดี (หรือ None ถ้าไม่มีจำนวนเต็มที่ลงตัว)
+    รองรับ n ติดลบเมื่อ k เป็นเลขคี่ (เช่นรากที่ 3 ของจำนวนลบ)"""
+    if n < 0:
+        if k % 2 == 0:
+            return None
+        r = integer_nth_root(-n, k)
+        return -r if r is not None else None
+    if n == 0:
+        return 0
+    lo, hi = 0, 1
+    while hi ** k <= n:
+        hi *= 2
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if mid ** k <= n:
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo if lo ** k == n else None
+
+
+def try_root(value: Fraction, k: int):
+    """หารากที่ k ของเศษส่วน ถ้าลงตัวพอดีทั้งเศษและส่วน คืนค่า Fraction ผลลัพธ์ ไม่งั้นคืน None"""
+    rn = integer_nth_root(value.numerator, k)
+    if rn is None:
+        return None
+    rd = integer_nth_root(value.denominator, k)
+    if rd is None:
+        return None
+    return Fraction(rn, rd)
+
 
 class SolutionFound(Exception):
     """ใช้เพื่อ 'โยน' คำตอบ (โหนดของต้นไม้นิพจน์) ออกจากการค้นหาทันทีที่เจอ"""
@@ -45,16 +95,16 @@ def format_num(v: Fraction) -> str:
 
 
 # ---- โครงสร้างต้นไม้ของนิพจน์ ----------------------------------------------
-# leaf : ('L', value)
-# op   : ('OP', symbol, left_node, right_node, value)
-# fact : ('F', child_node, value)
+# leaf  : ('L', value)
+# op    : ('OP', symbol, left_node, right_node, value)
+# unary : ('U', symbol, child_node, value)   -- symbol เป็นหนึ่งใน '!', 'sqrt', 'cbrt'
 
 def node_value(node) -> Fraction:
     if node[0] == 'L':
         return node[1]
     if node[0] == 'OP':
         return node[4]
-    return node[2]  # 'F'
+    return node[3]  # 'U'
 
 
 def collect_ops(node, acc: set):
@@ -64,17 +114,26 @@ def collect_ops(node, acc: set):
         acc.add(node[1])
         collect_ops(node[2], acc)
         collect_ops(node[3], acc)
-    else:  # 'F'
-        acc.add('!')
-        collect_ops(node[1], acc)
+    else:  # 'U'
+        acc.add(node[1])
+        collect_ops(node[2], acc)
 
 
-def to_infix(node) -> str:
+def to_infix(node, depth: int = 0) -> str:
+    """แปลงต้นไม้เป็นข้อความสูตร โดยสลับชนิดวงเล็บตามความลึกของการซ้อน: () -> [] -> {} -> () ..."""
     if node[0] == 'L':
         return format_num(node[1])
+    ob, cb = bracket_pair(depth)
     if node[0] == 'OP':
-        return f"({to_infix(node[2])} {node[1]} {to_infix(node[3])})"
-    return f"({to_infix(node[1])})!"
+        left = to_infix(node[2], depth + 1)
+        right = to_infix(node[3], depth + 1)
+        return f"{ob}{left} {node[1]} {right}{cb}"
+    # 'U'
+    kind, disp = UNARY_DISPLAY[node[1]]
+    child = to_infix(node[2], depth + 1)
+    if kind == 'post':
+        return f"{ob}{child}{cb}{disp}"
+    return f"{disp}{ob}{child}{cb}"
 
 
 def to_steps(node, steps: list):
@@ -87,16 +146,32 @@ def to_steps(node, steps: list):
         lv, rv, val = node_value(node[2]), node_value(node[3]), node[4]
         sym = DISPLAY_SYMBOL.get(node[1], node[1])
         steps.append(f"{format_num(lv)} {sym} {format_num(rv)} = {format_num(val)}")
-    else:  # 'F'
-        to_steps(node[1], steps)
-        cv, val = node_value(node[1]), node[2]
-        steps.append(f"{format_num(cv)}! = {format_num(val)}")
+    else:  # 'U'
+        to_steps(node[2], steps)
+        kind, disp = UNARY_DISPLAY[node[1]]
+        cv, val = node_value(node[2]), node[3]
+        if kind == 'post':
+            steps.append(f"{format_num(cv)}{disp} = {format_num(val)}")
+        else:
+            steps.append(f"{disp}{format_num(cv)} = {format_num(val)}")
 
 
-def try_factorial_node(node):
+def try_unary_node(node, symbol: str):
+    """ลองสร้างโหนดยูนารีจากโหนดหนึ่ง: '!' แฟกทอเรียล, 'sqrt' รากที่ 2, 'cbrt' รากที่ 3
+    คืน None ถ้าทำไม่ได้ (เช่น ไม่ใช่จำนวนเต็มที่เหมาะสม หรือรากไม่ลงตัว)"""
     val = node_value(node)
-    if val.denominator == 1 and 0 <= val.numerator <= MAX_FACTORIAL_INPUT:
-        return ('F', node, Fraction(math.factorial(val.numerator)))
+    if symbol == '!':
+        if val.denominator == 1 and 0 <= val.numerator <= MAX_FACTORIAL_INPUT:
+            return ('U', '!', node, Fraction(math.factorial(val.numerator)))
+        return None
+    if symbol == 'sqrt':
+        if val < 0:
+            return None
+        root = try_root(val, 2)
+        return ('U', 'sqrt', node, root) if root is not None else None
+    if symbol == 'cbrt':
+        root = try_root(val, 3)
+        return ('U', 'cbrt', node, root) if root is not None else None
     return None
 
 
@@ -123,24 +198,27 @@ def gen_pair_results(a_node, b_node, ops: set):
     if '%' in ops and a.denominator == 1 and b.denominator == 1 and b.numerator != 0:
         res.append(('OP', '%', a_node, b_node, Fraction(a.numerator % b.numerator)))
 
-    if '!' in ops:
-        extra = []
-        for node in res:
-            f = try_factorial_node(node)
-            if f:
-                extra.append(f)
-        res.extend(extra)
+    extra = []
+    for node in res:
+        for symbol in ('!', 'sqrt', 'cbrt'):
+            if symbol in ops:
+                u = try_unary_node(node, symbol)
+                if u:
+                    extra.append(u)
+    res.extend(extra)
     return res
 
 
 def build_variants(num: Fraction, ops: set):
-    """เตรียมตัวเลือกของเลขแต่ละตัวก่อนเริ่มค้นหา (ตัวมันเอง และ ตัวมันเอง! ถ้าเลือกแฟกทอเรียลไว้)"""
+    """เตรียมตัวเลือกของเลขแต่ละตัวก่อนเริ่มค้นหา
+    (ตัวมันเอง, ตัวมันเอง! / √ตัวมันเอง / ∛ตัวมันเอง ถ้าเลือกเครื่องหมายนั้นไว้และทำได้)"""
     leaf = ('L', num)
     variants = [leaf]
-    if '!' in ops:
-        f = try_factorial_node(leaf)
-        if f:
-            variants.append(f)
+    for symbol in ('!', 'sqrt', 'cbrt'):
+        if symbol in ops:
+            u = try_unary_node(leaf, symbol)
+            if u:
+                variants.append(u)
     return variants
 
 
@@ -221,7 +299,10 @@ def parse_fraction(text: str) -> Fraction:
 # ---------------------------------------------------------------------------
 
 MAIN_OP_LABELS = {'+': '+ บวก', '-': '- ลบ', '*': '× คูณ', '/': '÷ หาร',
-                  '^': '^ ยกกำลัง', '!': '! แฟกทอเรียล', '%': '% มอดูโล (เศษจากการหาร)'}
+                  '^': '^ ยกกำลัง',
+                  'sqrt': '√ รากที่ 2 (สแควร์รูท)',
+                  'cbrt': '∛ รากที่ 3 (คิวบ์รูท)',
+                  '!': '! แฟกทอเรียล', '%': '% มอดูโล (เศษจากการหาร)'}
 EXTRA_OP_LABELS = {'//': '// หารปัดเศษลง (integer division)'}
 
 
@@ -229,8 +310,8 @@ class SolverApp:
     def __init__(self, root):
         self.root = root
         root.title("โปรแกรมหาสูตรคำนวณตัวเลข")
-        root.geometry("700x760")
-        root.minsize(700, 700)
+        root.geometry("700x900")
+        root.minsize(700, 760)
         root.resizable(True, True)
 
         self.stop_flag = threading.Event()
@@ -249,6 +330,8 @@ class SolverApp:
             '*': tk.BooleanVar(value=True),
             '/': tk.BooleanVar(value=True),
             '^': tk.BooleanVar(value=True),
+            'sqrt': tk.BooleanVar(value=True),
+            'cbrt': tk.BooleanVar(value=True),
             '!': tk.BooleanVar(value=True),
             '%': tk.BooleanVar(value=False),
         }
@@ -306,8 +389,10 @@ class SolverApp:
             ttk.Checkbutton(rows, variable=self.required_vars[op]).grid(row=i, column=2, padx=18)
 
         note = ttk.Label(frame_ops, foreground="#666",
-                          text="(วงเล็บ () จะถูกใส่ให้อัตโนมัติตามลำดับการคำนวณที่ดีที่สุด / "
-                               "ติ๊ก 'บังคับต้องมี' = คำตอบที่ได้จะต้องใช้เครื่องหมายนั้นอย่างน้อย 1 ครั้ง)",
+                          text="(วงเล็บจะถูกใส่ให้อัตโนมัติตามลำดับการคำนวณที่ดีที่สุด และสลับชนิดตามความลึก "
+                               "() -> [] -> {} -> () ... เพื่อให้อ่านสูตรที่ซ้อนกันหลายชั้นได้ง่ายขึ้น / "
+                               "ติ๊ก 'บังคับต้องมี' = คำตอบที่ได้จะต้องใช้เครื่องหมายนั้นอย่างน้อย 1 ครั้ง / "
+                               "√ และ ∛ จะใช้ได้เฉพาะตอนที่ผลลัพธ์ลงตัวพอดีเท่านั้น)",
                           wraplength=640, justify="left")
         note.pack(anchor="w", padx=10, pady=(2, 8))
 
